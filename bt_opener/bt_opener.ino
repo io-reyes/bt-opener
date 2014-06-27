@@ -3,43 +3,96 @@
 
 #include <Servo.h>
 
+#define SERVO_PIN 9
+#define BUZZER_PIN 10
+
+#define STEP_DELAY 25
+#define ACTIVE_DELAY 5000
+
+// Note: Servo consumes the most power at 0, least at 180.
+// Need to use a relay to switch power into the servo.
+#define SERVO_MIN 0
+#define SERVO_MAX 100
+
+#define BAUD_RATE 9600
+
+// Bluetooth constants
+#define START_CMD_CHAR '*'
+#define END_CMD_CHAR '#'
+#define DIV_CMD_CHAR '|'
+#define CMD_DIGITALWRITE 10
+#define CMD_ANALOGWRITE 11
+#define CMD_TEXT 12
+#define CMD_READ_ARDUDROID 13
+#define MAX_COMMAND 20  // max command number code. used for error checking.
+#define MIN_COMMAND 10  // minimum command number code. used for error checking. 
+#define IN_STRING_LENGHT 40
+#define MAX_ANALOGWRITE 255
+#define PIN_HIGH 3
+#define PIN_LOW 2
+
 Servo servo;
-
-const int BUTTON_PIN = 8;
-const int SERVO_PIN = 9;
-const int BUZZER_PIN = 10;
-
-const int STEP_DELAY = 25;
-const int ACTIVE_DELAY = 5000;
-
-// Note: Servo consumes the most power at 0, least at 180
-const int SERVO_MIN = 0;
-const int SERVO_MAX = 100;
+String text;
 
 void setup()
 {
-  pinMode(BUTTON_PIN, INPUT);
-  
   servo.attach(SERVO_PIN);
   servo.write(SERVO_MIN);
   delay(ACTIVE_DELAY);
   
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  
+  Serial1.begin(BAUD_RATE);
+  Serial1.println("Bluetooth connected");
+  Serial1.flush();
 }
 
 void loop()
 {
-  // Debounce the pushbutton
-  int buttonState = digitalRead(BUTTON_PIN);
-  delay(STEP_DELAY);
+  Serial1.flush();
   
-  if(buttonState && digitalRead(BUTTON_PIN))
+  // Ignore empty serial data
+  if(Serial1.available() < 1)
   {
-    // Cycle the buzzer and servo
-    digitalWrite(BUZZER_PIN, HIGH);
-    cycleServo();
-    digitalWrite(BUZZER_PIN, LOW);
+    return;
+  }
+  
+  // Ignore unstarted device
+  char getChar = Serial1.read();
+  if(getChar != START_CMD_CHAR)
+  {
+    return;
+  }
+    
+  // Retrieve command and data
+  int command = Serial1.parseInt();
+  int pinNum = Serial1.parseInt();
+  int pinValue = Serial1.parseInt();
+  
+  // Parse if received a text command
+  if(command == CMD_TEXT)
+  {
+    text = "";
+
+    while(Serial1.available())
+    {
+      char c = Serial1.read();
+      delay(5);
+      
+      if(c == END_CMD_CHAR)
+      {
+        digitalWrite(BUZZER_PIN, HIGH);
+        cycleServo();
+        digitalWrite(BUZZER_PIN, LOW);
+        break;
+      }
+      else if(c != DIV_CMD_CHAR)
+      {
+        text += c;
+        delay(5);
+      }
+    }
   }
 }
   
