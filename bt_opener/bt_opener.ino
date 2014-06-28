@@ -4,22 +4,25 @@
 #include <Servo.h>
 #include "passcode.h"  // #defines for BT_PAIRING_CODE, UNLOCK_CODE_COUNT, and UNLOCK CODE (see passcode_example.h)
 
-#define SERVO_PIN 9
-#define BUZZER_PIN 10
-
-#define STEP_DELAY 25
-#define ACTIVE_DELAY 5000  // Delay to wait for the servo to move into its initial position, and between user input keystrokes
+#define SERVO_PIN 2
+#define GREEN_LED_PIN 3
+#define RED_LED_PIN 4
+#define BUZZER_PIN 5
 
 // Note: Servo consumes the most power at 0, least at 180.
 // Need to use a relay to switch power into the servo.
 #define SERVO_MIN 0
 #define SERVO_MAX 100
-
-#define BAUD_RATE 9600
+#define STEP_DELAY 25
+#define ACTIVE_DELAY 5000  // Delay to wait for the servo to move into its initial position, and between user input keystrokes
 
 // Bluetooth constants
+#define BAUD_RATE 9600
 #define START_CMD_CHAR '*'
 #define CMD_DIGITALWRITE 10
+
+#define MAX_FAILURES 5
+#define DISABLE_DELAY 300000
 
 Servo servo;
 
@@ -28,38 +31,52 @@ int numKeysReceived;  // Counts the number of keys received in an input cycle
 int keysReceived[UNLOCK_CODE_COUNT];  // Array containing keys received
 const int unlockCode[UNLOCK_CODE_COUNT] = UNLOCK_CODE;  // Array countaining the unlock code
 
+unsigned long lastFailureTime;  // Time the last wrong code was entered
+int failureCount;  // Keeps track of how many failed attempts there have been
+
 void setup()
 {
   servo.attach(SERVO_PIN);
   servo.write(SERVO_MIN);
   delay(ACTIVE_DELAY);
   
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  digitalWrite(GREEN_LED_PIN, HIGH); 
+  
+  pinMode(RED_LED_PIN, OUTPUT);
+  digitalWrite(RED_LED_PIN, LOW);
+  
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
   
   Serial1.begin(BAUD_RATE);
-  Serial1.println("Bluetooth connected");
+  Serial1.println("CONNECTED");
   Serial1.flush();
   
-  lastKeyReceived = millis();
+  unsigned long time = millis();
+  
+  lastKeyReceived = time;
   resetInput();
+  
+  lastFailureTime = time;
+  failureCount = 0;
 }
 
 void loop()
 {
   Serial1.flush();
+  unsigned long time = millis();
   
-  // Ignore empty serial data
-  if(Serial1.available() < 1)
+  // Ignore empty or invalid serial data
+  if(Serial1.available() < 1 || Serial1.read() != START_CMD_CHAR)
   {
     return;
   }
   
-  // Ignore unstarted device
-  char getChar = Serial1.read();
-  if(getChar != START_CMD_CHAR)
+  // If enough time has passed since the last failure, reset the failure count
+  if(time < lastFailureTime || time - lastFailureTime > DISABLE_DELAY)
   {
-    return;
+     failureCount = 0; 
   }
     
   // Retrieve command and data
@@ -71,7 +88,7 @@ void loop()
   if(command == CMD_DIGITALWRITE)
   {
     // Reset stored inputs if idle for too long between keystrokes
-    unsigned long keyTime = millis();
+    unsigned long keyTime = time;
     if(keyTime > lastKeyReceived && keyTime - lastKeyReceived > ACTIVE_DELAY)
     {
      resetInput(); 
@@ -81,25 +98,30 @@ void loop()
         
     keysReceived[numKeysReceived++] = pinNum;
     
-    // Check against key code if the required number of keys have been received
+    // Check against key code if the required number of keys has been received
     if(numKeysReceived >= UNLOCK_CODE_COUNT)
     {
-      boolean unlocked = true;
-      for(int n = 0; n < UNLOCK_CODE_COUNT; n++)
+      if(validCode())
       {
-       unlocked = unlocked && (keysReceived[n] == unlockCode[n]);
-      }
-      
-      if(unlocked)
-      {
-       Serial1.println("UNLOCKED!");
+       Serial1.println("UNLOCKED");
        cycleServo(); 
       }
       else
       {
-        Serial1.println("INVALID CODE");
-      }
-      
+        lastFailureTime = time;
+        failureCount++;
+        
+        // Disable device for a time if there have been too many failed attempts
+        if(failureCount > MAX_FAILURES)
+        {
+          disable();
+        }
+        else
+        {
+          Serial1.println("INVALID CODE");
+        }
+      }    
+     
       resetInput();
     }
     
@@ -142,4 +164,28 @@ void resetInput()
     keysReceived[n] = -1;
   }
 }
+
+void disable()
+{
+  Serial1.println("LOCK OFFLINE");
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, HIGH);
   
+  delay(DISABLE_DELAY);
+  
+  Serial1.println("LOCK ONLINE");
+  digitalWrite(GREEN_LED_PIN, HIGH);
+  digitalWrite(RED_LED_PIN, LOW);  
+  failureCount = 0;
+}
+
+boolean validCode()
+{
+  boolean valid = true;
+  for(int n = 0; n < UNLOCK_CODE_COUNT; n++)
+  {
+    valid = valid && (keysReceived[n] == unlockCode[n]);
+  }
+  
+  return valid;
+}
