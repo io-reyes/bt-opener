@@ -1,5 +1,9 @@
-// Cycling a servo from the neutral position to the "unlock door"
-// position back to neutral
+// Irwin Reyes
+// dev@irwinreyes.com
+// https://github.com/io-reyes/bt-opener/
+// Receives Bluetooth input from ArduDroid app and turns servo upon correct key code. Drives
+// additional outputs such as a buzzer when unlocking and LED ready/timeout indicators.
+// (Circuit diagram to come)
 
 #include <Servo.h>
 #include "passcode.h"  // #defines for BT_PAIRING_CODE, UNLOCK_CODE_COUNT, and UNLOCK CODE (see passcode_example.h)
@@ -89,14 +93,13 @@ void loop()
   {
     // Reset stored inputs if idle for too long between keystrokes
     unsigned long keyTime = time;
-    if(keyTime > lastKeyReceived && keyTime - lastKeyReceived > ACTIVE_DELAY)
+    if(keyTime < lastKeyReceived || keyTime - lastKeyReceived > ACTIVE_DELAY)
     {
      resetInput(); 
     }
-    
-    lastKeyReceived = keyTime;
-        
+            
     keysReceived[numKeysReceived++] = pinNum;
+    lastKeyReceived = keyTime;
     
     // Check against key code if the required number of keys has been received
     if(numKeysReceived >= UNLOCK_CODE_COUNT)
