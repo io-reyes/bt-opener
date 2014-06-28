@@ -2,12 +2,13 @@
 // position back to neutral
 
 #include <Servo.h>
+#include "passcode.h"  // #defines for BT_PAIRING_CODE, UNLOCK_CODE_COUNT, and UNLOCK CODE (see passcode_example.h)
 
 #define SERVO_PIN 9
 #define BUZZER_PIN 10
 
 #define STEP_DELAY 25
-#define ACTIVE_DELAY 5000
+#define ACTIVE_DELAY 5000  // Delay to wait for the servo to move into its initial position, and between user input keystrokes
 
 // Note: Servo consumes the most power at 0, least at 180.
 // Need to use a relay to switch power into the servo.
@@ -18,21 +19,14 @@
 
 // Bluetooth constants
 #define START_CMD_CHAR '*'
-#define END_CMD_CHAR '#'
-#define DIV_CMD_CHAR '|'
 #define CMD_DIGITALWRITE 10
-#define CMD_ANALOGWRITE 11
-#define CMD_TEXT 12
-#define CMD_READ_ARDUDROID 13
-#define MAX_COMMAND 20  // max command number code. used for error checking.
-#define MIN_COMMAND 10  // minimum command number code. used for error checking. 
-#define IN_STRING_LENGHT 40
-#define MAX_ANALOGWRITE 255
-#define PIN_HIGH 3
-#define PIN_LOW 2
 
 Servo servo;
-String text;
+
+unsigned long lastKeyReceived;  // Time the last key was received
+int numKeysReceived;  // Counts the number of keys received in an input cycle
+int keysReceived[UNLOCK_CODE_COUNT];  // Array containing keys received
+const int unlockCode[UNLOCK_CODE_COUNT] = UNLOCK_CODE;  // Array countaining the unlock code
 
 void setup()
 {
@@ -46,6 +40,9 @@ void setup()
   Serial1.begin(BAUD_RATE);
   Serial1.println("Bluetooth connected");
   Serial1.flush();
+  
+  lastKeyReceived = millis();
+  resetInput();
 }
 
 void loop()
@@ -70,27 +67,48 @@ void loop()
   int pinNum = Serial1.parseInt();
   int pinValue = Serial1.parseInt();
   
-  // Parse if received a text command
-  if(command == CMD_TEXT)
+  // Parse if received a digitalWrite command
+  if(command == CMD_DIGITALWRITE)
   {
-    text = "";
-
-    while(Serial1.available())
+    // Reset stored inputs if idle for too long between keystrokes
+    unsigned long keyTime = millis();
+    if(keyTime > lastKeyReceived && keyTime - lastKeyReceived > ACTIVE_DELAY)
     {
-      char c = Serial1.read();
-      delay(5);
-      
-      if(c == END_CMD_CHAR)
+     resetInput(); 
+    }
+    
+    lastKeyReceived = keyTime;
+        
+    keysReceived[numKeysReceived++] = pinNum;
+    
+    // Check against key code if the required number of keys have been received
+    if(numKeysReceived >= UNLOCK_CODE_COUNT)
+    {
+      boolean unlocked = true;
+      for(int n = 0; n < UNLOCK_CODE_COUNT; n++)
       {
-        digitalWrite(BUZZER_PIN, HIGH);
-        cycleServo();
-        digitalWrite(BUZZER_PIN, LOW);
-        break;
+       unlocked = unlocked && (keysReceived[n] == unlockCode[n]);
       }
-      else if(c != DIV_CMD_CHAR)
+      
+      if(unlocked)
       {
-        text += c;
-        delay(5);
+       Serial1.println("UNLOCKED!");
+       cycleServo(); 
+      }
+      else
+      {
+        Serial1.println("INVALID CODE");
+      }
+      
+      resetInput();
+    }
+    
+    // Otherwise just display asterisks as feedback on the device
+    else
+    {
+      for(int n = 0 ; n < numKeysReceived; n++)
+      {
+        Serial1.print('*');
       }
     }
   }
@@ -98,6 +116,8 @@ void loop()
   
 void cycleServo()
 { 
+  digitalWrite(BUZZER_PIN, HIGH);
+  
   for(int pos = SERVO_MIN; pos <= SERVO_MAX; pos++)
   {
     servo.write(pos);
@@ -108,6 +128,18 @@ void cycleServo()
   {
     servo.write(pos);
     delay(STEP_DELAY);
+  }
+  
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+void resetInput()
+{
+  numKeysReceived = 0;
+  
+  for(int n = 0; n < UNLOCK_CODE_COUNT; n++)
+  {
+    keysReceived[n] = -1;
   }
 }
   
